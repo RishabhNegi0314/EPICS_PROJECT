@@ -1,0 +1,26 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Environment variables (very important)
+.env
+
+# Firebase service account key (never upload)
+serviceAccountKey.json
+
+# Build folders
+build/
+dist/
+
+# Logs
+*.log
+logs/
+
+# React
+phase1-frontend/node_modules/
+phase1-frontend/.env
+
+# Cloudinary auto-generated cached files
+*.cache
+
