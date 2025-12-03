@@ -1,15 +1,20 @@
+// server.js (phase1-backend)
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('cloudinary').v2;
-const { admin, db } = require('./firebase'); // yaha rakho
+
+const { admin, db } = require('./firebase');
+const autoCategorize = require('./categorize');
+const checkDuplicate = require('./duplicate');
+const getSeverity = require('./severity');
 
 const app = express();
 app.use(cors());
-app.use(express.json()); // ab yaha sahi jagah hai
-
+app.use(express.json()); // JSON body parser
 
 // ---------- Cloudinary Config ----------
 cloudinary.config({
@@ -22,7 +27,7 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
   cloudinary,
   params: {
-    folder: 'epics-issues',          // Cloudinary folder name
+    folder: 'epics-issues', // Cloudinary folder name
     allowed_formats: ['jpg', 'jpeg', 'png'],
   },
 });
@@ -31,10 +36,10 @@ const upload = multer({ storage });
 
 // Simple test route
 app.get('/', (req, res) => {
-  res.send('EPICS Phase 1 backend running ✅');
+  res.send('EPICS backend running ✅');
 });
 
-// ---------- Upload API ----------
+// ---------- Upload API + Firestore + Category + Severity + Duplicate ----------
 app.post('/upload', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -44,8 +49,8 @@ app.post('/upload', upload.single('image'), async (req, res) => {
       });
     }
 
-    // Text fields: description, latitude, longitude
-    const { description, latitude, longitude } = req.body;
+    // Text fields: description, latitude, longitude, name, phone
+    const { description, latitude, longitude, name, phone } = req.body;
 
     const imageUrl = req.file.path;      // Cloudinary URL
     const publicId = req.file.filename;  // Cloudinary public_id
@@ -59,13 +64,51 @@ app.post('/upload', upload.single('image'), async (req, res) => {
       );
     }
 
-    // Firestore me document create karo
+    // 1) Duplicate detection (only if location present)
+    let duplicateResult = { isDuplicate: false, duplicateOf: null };
+    if (latitude && longitude) {
+      duplicateResult = await checkDuplicate(
+        db,
+        parseFloat(latitude),
+        parseFloat(longitude)
+      );
+    }
+
+    // 2) Auto categorization + severity
+    let category = 'other';
+    let severity = 'mild';
+
+    try {
+      category = await autoCategorize(imageUrl);
+      console.log('Predicted Category =>', category);
+
+      severity = await getSeverity(imageUrl, category);
+      console.log('Predicted Severity =>', severity);
+    } catch (mlErr) {
+      console.error('Error in ML (category/severity):', mlErr.message);
+      // fallback values: category = 'other', severity = 'mild'
+    }
+
+    // 3) Firestore document
     const reportData = {
       imageUrl,
       publicId,
       description: description || '',
       location,
-      status: 'pending', // default
+
+      // 🔹 User info
+      userName: name || '',
+      phone: phone || '',
+
+      // 🔹 Duplicate flags
+      status: duplicateResult.isDuplicate ? 'duplicate' : 'pending',
+      isDuplicate: duplicateResult.isDuplicate,
+      duplicateOf: duplicateResult.duplicateOf || null,
+
+      // 🔹 Category + Severity
+      category: category || 'other',
+      severity: severity || 'mild',
+
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
@@ -76,6 +119,10 @@ app.post('/upload', upload.single('image'), async (req, res) => {
       message: 'Image + report saved successfully',
       reportId: docRef.id,
       imageUrl,
+      category,
+      severity,
+      status: reportData.status,
+      duplicate: duplicateResult,
     });
   } catch (error) {
     console.error('Error in /upload:', error);
@@ -95,7 +142,7 @@ app.get('/reports', async (req, res) => {
       .orderBy('createdAt', 'desc')
       .get();
 
-    const reports = snapshot.docs.map(doc => ({
+    const reports = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));

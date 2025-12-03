@@ -1,26 +1,22 @@
-# Node.js
+# Node
 node_modules/
-npm-debug.log
-yarn-error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Environment variables (very important)
+# env / secrets
 .env
-
-# Firebase service account key (never upload)
+.env.local
+.env.*.local
 serviceAccountKey.json
+serviceAccountKey-*.json
 
-# Build folders
-build/
-dist/
+# OS
+.DS_Store
+Thumbs.db
 
-# Logs
-*.log
-logs/
-
-# React
-phase1-frontend/node_modules/
-phase1-frontend/.env
-
-# Cloudinary auto-generated cached files
-*.cache
+# logs and build
+/dist
+/build
+/.cache
 
